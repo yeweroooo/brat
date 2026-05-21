@@ -1,0 +1,10 @@
+node_modules/
+output/
+.omx/
+scratch/
+coverage/
+.nyc_output/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store

@@ -1,0 +1,53 @@
+{
+  "name": "brat",
+  "version": "1.0.0",
+  "description": "A browserless brat generator module for JavaScript, powered by Sharp.",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "bin": {
+    "brat": "./src/cli.js",
+    "brat-sharp": "./src/cli.js"
+  },
+  "files": [
+    "docs/brat-example.png",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yeweroooo/brat.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yeweroooo/brat/issues"
+  },
+  "homepage": "https://github.com/yeweroooo/brat#readme",
+  "scripts": {
+    "brat": "node src/cli.js",
+    "sample": "node src/cli.js --text \"hello brat\" --out output/brat.png --size 1024",
+    "test": "node --test"
+  },
+  "keywords": [
+    "brat",
+    "brat-generator",
+    "generator",
+    "image",
+    "image-generator",
+    "javascript",
+    "nodejs",
+    "module",
+    "cli",
+    "png",
+    "sharp"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "dependencies": {
+    "sharp": "^0.34.5"
+  }
+}
