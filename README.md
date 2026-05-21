@@ -27,7 +27,7 @@ npm install
 When used as a dependency in another project:
 
 ```bash
-npm install brat
+npm install @ghuts/brat
 ```
 
 ## CLI Usage
@@ -64,7 +64,7 @@ brat --text "hello brat" --out output/brat.png
 ## Module Usage
 
 ```js
-import { renderBrat } from 'brat';
+import { renderBrat } from '@ghuts/brat';
 
 const result = await renderBrat({
   text: 'hello brat',
@@ -111,7 +111,7 @@ Parameters:
 Creates the SVG string used internally before PNG conversion. This is useful when you want to inspect or transform the vector source yourself.
 
 ```js
-import { createBratSvg } from 'brat';
+import { createBratSvg } from '@ghuts/brat';
 
 const svg = await createBratSvg({
   text: 'vector first',

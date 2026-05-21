@@ -1,5 +1,5 @@
 {
-  "name": "brat",
+  "name": "@ghuts/brat",
   "version": "1.0.0",
   "description": "A browserless brat generator module for JavaScript, powered by Sharp.",
   "type": "module",
