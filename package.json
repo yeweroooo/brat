@@ -1,6 +1,6 @@
 {
   "name": "@ghuts/brat",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A browserless brat generator module for JavaScript, powered by Sharp.",
   "type": "module",
   "main": "./src/index.js",
@@ -8,8 +8,8 @@
     ".": "./src/index.js"
   },
   "bin": {
-    "brat": "./src/cli.js",
-    "brat-sharp": "./src/cli.js"
+    "brat": "src/cli.js",
+    "brat-sharp": "src/cli.js"
   },
   "files": [
     "docs/brat-example.png",
