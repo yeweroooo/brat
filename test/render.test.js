@@ -42,6 +42,40 @@ test('createBratSvg escapes text content', async () => {
   assert.doesNotMatch(svg, /<hello & brat>/);
 });
 
+test('createBratSvg embeds Apple-style emoji images including newest emoji', async () => {
+  const svg = await createBratSvg({
+    text: 'brat 🫩 🫆',
+    size: 512
+  });
+
+  assert.match(svg, /<image /);
+  assert.match(svg, /data:image\/png;base64,/);
+  assert.doesNotMatch(svg, />🫩</);
+  assert.doesNotMatch(svg, />🫆</);
+});
+
+test('renderBrat writes a PNG with Apple-style emoji', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'brat-emoji-test-'));
+  const out = path.join(dir, 'brat-emoji.png');
+
+  try {
+    const result = await renderBrat({
+      text: 'emoji test 🫩❤️‍🔥',
+      out,
+      size: 512
+    });
+
+    const metadata = await sharp(out).metadata();
+    assert.equal(result.path, out);
+    assert.equal(metadata.format, 'png');
+    assert.equal(metadata.width, 512);
+    assert.equal(metadata.height, 512);
+    assert.ok(result.size > 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('normalizeRenderOptions rejects invalid input', () => {
   assert.throws(() => normalizeRenderOptions({ text: '' }), /text/);
   assert.throws(() => normalizeRenderOptions({ text: 'ok', size: 128 }), /size/);

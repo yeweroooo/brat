@@ -10,6 +10,7 @@
 - ESM module API for JavaScript projects.
 - CLI for quick image generation.
 - Automatic text fitting and line wrapping.
+- Apple/iPhone-style emoji rendering, including Emoji 16/newest emoji from `emoji-datasource-apple`.
 - Two layout presets: `full` and `web`.
 - No Playwright, Chromium, or website scraping dependency.
 
@@ -36,6 +37,12 @@ Generate a default `1024x1024` PNG:
 
 ```bash
 npm run brat -- --text "hello brat" --out output/brat.png
+```
+
+Emoji render as bundled Apple/iPhone-style PNGs instead of missing font glyphs:
+
+```bash
+npm run brat -- --text "brat emoji 🫩 🫆 ❤️‍🔥" --out output/brat-emoji.png
 ```
 
 Run the CLI file directly:

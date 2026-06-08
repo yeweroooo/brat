@@ -1,19 +1,32 @@
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateSync } from 'node:zlib';
+import emojiRegex from 'emoji-regex';
 import { createTtfAdvanceMeasurer, fitTextToBox } from './textFit.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 const SOURCE_FONT_PATH = path.join(__dirname, 'assets', 'arial_narrow.woff');
+const APPLE_EMOJI_DIR = path.join(
+  path.dirname(require.resolve('emoji-datasource-apple/package.json')),
+  'img',
+  'apple',
+  '64'
+);
 const RUNTIME_FONT_DIR = path.join(os.tmpdir(), 'brat-sharp', 'fonts');
 const RUNTIME_FONT_PATH = path.join(RUNTIME_FONT_DIR, 'arial_narrow.ttf');
 const RUNTIME_FONT_CONFIG = path.join(RUNTIME_FONT_DIR, 'fonts.conf');
 const FONT_CACHE_DIR = path.join(os.tmpdir(), 'brat-sharp', 'fontcache');
 const REFERENCE_SIZE = 1024;
 const FIT_MARGIN = 0.5;
+const EMOJI_WIDTH_RATIO = 1.02;
+const EMOJI_SIZE_RATIO = 0.95;
+const EMOJI_BASELINE_RATIO = 0.86;
+const emojiImageCache = new Map();
 
 export const layouts = Object.freeze({
   full: {
@@ -107,7 +120,8 @@ export async function createBratSvg(options) {
   await prepareFontConfig();
 
   const fontBuffer = await readFile(RUNTIME_FONT_PATH);
-  const measureText = createTtfAdvanceMeasurer(fontBuffer);
+  const measurePlainText = createTtfAdvanceMeasurer(fontBuffer);
+  const measureText = createEmojiAwareMeasurer(measurePlainText);
   const theme = scaleLayout(normalized.layout, normalized.size, normalized.blur);
   let fitted = fitTextToBox(normalized.text, {
     width: theme.contentWidth,
@@ -139,26 +153,38 @@ export async function createBratSvg(options) {
     ? theme.contentY + (theme.contentHeight - fitted.blockHeight) / 2
     : theme.contentY;
 
-  const lines = fitted.lines.map((line, index) => {
+  const renderedLines = [];
+  for (let index = 0; index < fitted.lines.length; index += 1) {
+    const line = fitted.lines[index];
     const y = blockTop + (index + theme.baseline) * fitted.lineHeightPx;
     const naturalWidth = measureText(line, fitted.fontSize);
     const justify = fitted.lines.length > 1
+      && !containsEmoji(line)
       && splitLineWords(line).length > 1
       && naturalWidth < theme.contentWidth - FIT_MARGIN;
 
     if (justify) {
-      return renderJustifiedLine({
+      renderedLines.push(renderJustifiedLine({
         line,
         x: theme.contentX,
         y,
         width: theme.contentWidth,
         fontSize: fitted.fontSize,
         measureText
-      });
+      }));
+      continue;
     }
 
-    return `<tspan x="${formatNumber(theme.contentX)}" y="${formatNumber(y)}">${escapeHtml(line)}</tspan>`;
-  }).join('\n      ');
+    renderedLines.push(await renderEmojiAwareLine({
+      line,
+      x: theme.contentX,
+      y,
+      fontSize: fitted.fontSize,
+      measurePlainText
+    }));
+  }
+
+  const lines = renderedLines.join('\n      ');
 
   return `
 <svg width="${normalized.size}" height="${normalized.size}" viewBox="0 0 ${normalized.size} ${normalized.size}" xmlns="http://www.w3.org/2000/svg">
@@ -168,18 +194,18 @@ export async function createBratSvg(options) {
     </filter>
   </defs>
   <rect width="100%" height="100%" fill="${DEFAULT_THEME.background}" />
-  <text font-family="${DEFAULT_THEME.fontFamily}"
-        font-weight="${DEFAULT_THEME.fontWeight}"
-        font-size="${formatNumber(fitted.fontSize)}px"
-        fill="${DEFAULT_THEME.color}"
-        stroke="${DEFAULT_THEME.color}"
-        stroke-width="${formatNumber(theme.strokeWidth)}"
-        paint-order="stroke fill"
-        stroke-linejoin="round"
-        text-anchor="start"
-        filter="url(#bratBlur)">
+  <g font-family="${DEFAULT_THEME.fontFamily}"
+     font-weight="${DEFAULT_THEME.fontWeight}"
+     font-size="${formatNumber(fitted.fontSize)}px"
+     fill="${DEFAULT_THEME.color}"
+     stroke="${DEFAULT_THEME.color}"
+     stroke-width="${formatNumber(theme.strokeWidth)}"
+     paint-order="stroke fill"
+     stroke-linejoin="round"
+     text-anchor="start"
+     filter="url(#bratBlur)">
       ${lines}
-  </text>
+  </g>
 </svg>
 `;
 }
@@ -317,10 +343,117 @@ function renderJustifiedLine({ line, x, y, width, fontSize, measureText }) {
   let cursor = x;
 
   return words.map((word) => {
-    const tspan = `<tspan x="${formatNumber(cursor)}" y="${formatNumber(y)}">${escapeHtml(word)}</tspan>`;
+    const text = renderTextChunk(word, cursor, y);
     cursor += measureText(word, fontSize) + gap;
-    return tspan;
+    return text;
   }).join('');
+}
+
+function createEmojiAwareMeasurer(measurePlainText) {
+  return function measureEmojiAwareText(text, fontSize) {
+    return tokenizeEmoji(text).reduce((width, token) => {
+      if (token.type === 'emoji') return width + fontSize * EMOJI_WIDTH_RATIO;
+      return width + measurePlainText(token.value, fontSize);
+    }, 0);
+  };
+}
+
+async function renderEmojiAwareLine({ line, x, y, fontSize, measurePlainText }) {
+  const tokens = tokenizeEmoji(line);
+  let cursor = x;
+  const parts = [];
+
+  for (const token of tokens) {
+    if (token.type !== 'emoji') {
+      if (token.value) {
+        parts.push(renderTextChunk(token.value, cursor, y));
+        cursor += measurePlainText(token.value, fontSize);
+      }
+      continue;
+    }
+
+    const dataUri = await getAppleEmojiDataUri(token.value);
+    if (!dataUri) {
+      parts.push(renderTextChunk(token.value, cursor, y));
+      cursor += measurePlainText(token.value, fontSize);
+      continue;
+    }
+
+    const imageSize = fontSize * EMOJI_SIZE_RATIO;
+    const imageY = y - fontSize * EMOJI_BASELINE_RATIO;
+    parts.push(
+      `<image x="${formatNumber(cursor)}" y="${formatNumber(imageY)}" width="${formatNumber(imageSize)}" height="${formatNumber(imageSize)}" href="${dataUri}" preserveAspectRatio="xMidYMid meet" />`
+    );
+    cursor += fontSize * EMOJI_WIDTH_RATIO;
+  }
+
+  return parts.join('');
+}
+
+function renderTextChunk(text, x, y) {
+  return `<text x="${formatNumber(x)}" y="${formatNumber(y)}">${escapeHtml(text)}</text>`;
+}
+
+function tokenizeEmoji(text) {
+  const source = String(text ?? '');
+  const regex = emojiRegex();
+  const tokens = [];
+  let lastIndex = 0;
+
+  for (const match of source.matchAll(regex)) {
+    if (match.index > lastIndex) {
+      tokens.push({ type: 'text', value: source.slice(lastIndex, match.index) });
+    }
+    tokens.push({ type: 'emoji', value: match[0] });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < source.length) {
+    tokens.push({ type: 'text', value: source.slice(lastIndex) });
+  }
+
+  return tokens.length > 0 ? tokens : [{ type: 'text', value: source }];
+}
+
+function containsEmoji(text) {
+  return emojiRegex().test(String(text ?? ''));
+}
+
+async function getAppleEmojiDataUri(emoji) {
+  const candidates = emojiFilenameCandidates(emoji);
+
+  for (const filename of candidates) {
+    const cached = emojiImageCache.get(filename);
+    if (cached !== undefined) return cached;
+
+    const imagePath = path.join(APPLE_EMOJI_DIR, filename);
+    try {
+      await access(imagePath);
+      const image = await readFile(imagePath);
+      const dataUri = `data:image/png;base64,${image.toString('base64')}`;
+      emojiImageCache.set(filename, dataUri);
+      return dataUri;
+    } catch {
+      emojiImageCache.set(filename, null);
+    }
+  }
+
+  return null;
+}
+
+function emojiFilenameCandidates(emoji) {
+  const codepoints = [...emoji].map((char) => char.codePointAt(0).toString(16));
+  const exact = `${codepoints.join('-')}.png`;
+  const withoutTextPresentation = `${codepoints.filter((codepoint) => codepoint !== 'fe0f').join('-')}.png`;
+  const withEmojiPresentation = codepoints.includes('fe0f')
+    ? exact
+    : `${codepoints.flatMap((codepoint) => needsEmojiPresentation(codepoint) ? [codepoint, 'fe0f'] : [codepoint]).join('-')}.png`;
+
+  return [...new Set([exact, withEmojiPresentation, withoutTextPresentation])];
+}
+
+function needsEmojiPresentation(codepoint) {
+  return codepoint.length <= 4 && !codepoint.startsWith('1f') && !codepoint.startsWith('e0');
 }
 
 function splitLineWords(line) {
